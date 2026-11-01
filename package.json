@@ -22,6 +22,12 @@
     },
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build": "tsc && chmod +x dist/index.js",
     "dev": "tsx watch src/index.ts",
