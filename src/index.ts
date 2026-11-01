@@ -15,21 +15,13 @@ import {
   formatScaleUsers,
   formatSyncDiagnostics,
 } from "./utils/formatting.js";
-import { createLogger, format, transports } from "winston";
+import { createAppLogger } from "./logger.js";
 
 const config = loadConfig();
 
-const logger = createLogger({
+const logger = createAppLogger({
   level: config.logLevel,
-  format: format.combine(
-    format.timestamp(),
-    format.errors({ stack: true }),
-    format.json(),
-  ),
-  transports: [
-    new transports.File({ filename: "renpho-error.log", level: "error" }),
-    new transports.File({ filename: "renpho-combined.log" }),
-  ],
+  logDir: config.logDir,
 });
 
 const renphoApi = new RenphoApiService(config.email, config.password);

@@ -2,6 +2,7 @@ export interface RenphoConfig {
   email: string;
   password: string;
   logLevel: string;
+  logDir?: string;
 }
 
 export function loadConfig(): RenphoConfig {
@@ -15,6 +16,7 @@ export function loadConfig(): RenphoConfig {
   return {
     email,
     password,
-    logLevel: process.env.LOG_LEVEL || 'info'
+    logLevel: process.env.LOG_LEVEL || 'info',
+    logDir: process.env.LOG_DIR || undefined
   };
 }

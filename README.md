@@ -39,6 +39,11 @@ RENPHO_EMAIL=your-email@example.com
 RENPHO_PASSWORD=your-password
 ```
 
+Optional settings:
+
+- `LOG_LEVEL` — `debug`, `info` (default), `warn` or `error`.
+- `LOG_DIR` — also write size-capped log files (5 MB x 3) to this directory. Logs always go to stderr; stdout is reserved for the MCP protocol. Unset means no log files are written.
+
 ### Claude Code
 
 Add the server to `~/.claude.json` for user-wide configuration, or `.mcp.json` in your client project's root for project-scoped configuration—not `settings.json`. See [Claude Code's MCP documentation](https://code.claude.com/docs/en/mcp).
