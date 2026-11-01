@@ -16,6 +16,7 @@ const API_BASE = "https://cloud.renpho.com";
 const ENCRYPTION_SECRET = "ed*wijdi$h6fe3ew";
 const DEFAULT_PAGE_SIZE = 200;
 const MAX_MEASUREMENT_SCAN = 1000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
 // Only numerical body-composition metrics belong in the public measurement.
 // Never copy report IDs, demographics, or third-party synchronization/auth data.
@@ -217,10 +218,17 @@ export class RenphoApiService {
   private password: string;
   private sessionCache: CachedSession | null = null;
   private measurementCache: LRUCache<string, RenphoMeasurement[]>;
+  private requestTimeoutMs: number;
 
-  constructor(email: string, password: string) {
+  constructor(
+    email: string,
+    password: string,
+    options: { requestTimeoutMs?: number } = {},
+  ) {
     this.email = email;
     this.password = password;
+    this.requestTimeoutMs =
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.measurementCache = new LRUCache<string, RenphoMeasurement[]>({
       max: 100,
       ttl: 5 * 60 * 1000, // 5 minutes
@@ -312,8 +320,14 @@ export class RenphoApiService {
     init: RequestInit,
   ): Promise<Response> {
     try {
-      return await fetch(`${API_BASE}/${path}`, init);
-    } catch {
+      return await fetch(`${API_BASE}/${path}`, {
+        ...init,
+        signal: AbortSignal.timeout(this.requestTimeoutMs),
+      });
+    } catch (error) {
+      if ((error as Error).name === "TimeoutError") {
+        throw new Error(`Request timed out calling ${path}`);
+      }
       throw new Error(`Network error calling ${path}`);
     }
   }
