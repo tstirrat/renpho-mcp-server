@@ -267,7 +267,7 @@ server.tool(
   "Clear Renpho auth/measurement caches and re-fetch account state. Useful after taking a new measurement or after the mobile app syncs.",
   async () => {
     try {
-      renphoApi.invalidateCaches();
+      renphoApi.refreshSession();
       const user = await renphoApi.getCurrentUser();
       return {
         content: [

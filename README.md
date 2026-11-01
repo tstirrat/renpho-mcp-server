@@ -118,6 +118,7 @@ Once configured, ask Claude:
 - Scans all discovered Renpho scale tables and scale-user IDs before selecting measurements for the current user
 - Includes a sync diagnostics tool to surface measurements associated with linked scale users but not currently selected for the logged-in user
 - Caches authentication tokens (50 min) and measurements (5 min) to reduce API calls
+- Concurrent requests share one login. `refresh_data` always clears cached measurements but only forces a new Renpho login if the current one is over 60 seconds old
 
 ### MorphoScan compatibility limits
 

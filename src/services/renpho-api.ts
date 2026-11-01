@@ -17,6 +17,7 @@ const ENCRYPTION_SECRET = "ed*wijdi$h6fe3ew";
 const DEFAULT_PAGE_SIZE = 200;
 const MAX_MEASUREMENT_SCAN = 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_MIN_RELOGIN_INTERVAL_MS = 60_000;
 
 // Only numerical body-composition metrics belong in the public measurement.
 // Never copy report IDs, demographics, or third-party synchronization/auth data.
@@ -219,16 +220,22 @@ export class RenphoApiService {
   private sessionCache: CachedSession | null = null;
   private measurementCache: LRUCache<string, RenphoMeasurement[]>;
   private requestTimeoutMs: number;
+  private minReloginIntervalMs: number;
+  private loginInFlight: Promise<CachedSession> | null = null;
+  private lastLoginAt = 0;
+  private cacheGeneration = 0;
 
   constructor(
     email: string,
     password: string,
-    options: { requestTimeoutMs?: number } = {},
+    options: { requestTimeoutMs?: number; minReloginIntervalMs?: number } = {},
   ) {
     this.email = email;
     this.password = password;
     this.requestTimeoutMs =
       options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.minReloginIntervalMs =
+      options.minReloginIntervalMs ?? DEFAULT_MIN_RELOGIN_INTERVAL_MS;
     this.measurementCache = new LRUCache<string, RenphoMeasurement[]>({
       max: 100,
       ttl: 5 * 60 * 1000, // 5 minutes
@@ -275,7 +282,20 @@ export class RenphoApiService {
 
   invalidateCaches(): void {
     this.sessionCache = null;
+    this.loginInFlight = null;
+    this.cacheGeneration += 1;
     this.measurementCache.clear();
+  }
+
+  // Always drops cached measurements, but only forces a new Renpho login when
+  // the current one is old enough. Repeated refreshes must not hammer the
+  // unofficial login endpoint, which can rate-limit or lock the account.
+  refreshSession(): void {
+    if (Date.now() - this.lastLoginAt >= this.minReloginIntervalMs) {
+      this.invalidateCaches();
+    } else {
+      this.measurementCache.clear();
+    }
   }
 
   private safeApiCode(code: unknown): number | "invalid" {
@@ -388,11 +408,21 @@ export class RenphoApiService {
     return this.parseDecryptedResponse<T>(rawResponse, path);
   }
 
+  // Concurrent callers share one login instead of each hitting Renpho.
   private async authenticate(): Promise<CachedSession> {
     if (this.sessionCache && this.sessionCache.expires_at > Date.now()) {
       return this.sessionCache;
     }
+    if (!this.loginInFlight) {
+      const attempt = this.login(this.cacheGeneration).finally(() => {
+        if (this.loginInFlight === attempt) this.loginInFlight = null;
+      });
+      this.loginInFlight = attempt;
+    }
+    return this.loginInFlight;
+  }
 
+  private async login(generation: number): Promise<CachedSession> {
     const loginData = {
       questionnaire: {},
       login: {
@@ -501,7 +531,11 @@ export class RenphoApiService {
       scaleUserIds: this.unique(scaleTables.flatMap((scale) => scale.user_ids)),
     };
 
-    this.sessionCache = session;
+    // A cache invalidation during the login makes this session stale.
+    if (generation === this.cacheGeneration) {
+      this.sessionCache = session;
+      this.lastLoginAt = Date.now();
+    }
     return session;
   }
 
