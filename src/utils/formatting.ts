@@ -7,13 +7,31 @@ import {
   RenphoSyncDiagnostics,
 } from "../types/renpho.js";
 
-export function formatDate(timestamp: number): string {
+// Returns the zone unchanged when it is a valid IANA name, undefined for an
+// unset/blank value, and throws for anything else so a typo fails at startup
+// instead of inside every tool call.
+export function resolveTimeZone(timeZone?: string): string | undefined {
+  const trimmed = timeZone?.trim();
+  if (!trimmed) return undefined;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: trimmed });
+  } catch {
+    throw new Error(`Invalid time zone: ${trimmed}`);
+  }
+  return trimmed;
+}
+
+// Without an explicit zone this uses the host's, which is UTC on most servers.
+// The zone name is always printed so a reader never has to guess.
+export function formatDate(timestamp: number, timeZone?: string): string {
   return new Date(timestamp * 1000).toLocaleDateString("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone,
+    timeZoneName: "short",
   });
 }
 
@@ -29,8 +47,11 @@ export function formatUser(user: RenphoUser): string {
   return text;
 }
 
-export function formatMeasurement(m: RenphoMeasurement): string {
-  let text = `Date: ${formatDate(m.time_stamp)}\n\n`;
+export function formatMeasurement(
+  m: RenphoMeasurement,
+  timeZone?: string,
+): string {
+  let text = `Date: ${formatDate(m.time_stamp, timeZone)}\n\n`;
   text += `**Core Metrics:**\n`;
   text += `- Weight: ${m.weight?.toFixed(1) || "N/A"} kg\n`;
   text += `- BMI: ${m.bmi?.toFixed(1) || "N/A"}\n`;
@@ -86,9 +107,12 @@ function formatAdvancedBodyComposition(m: RenphoMeasurement): string {
   );
 }
 
-export function formatBodyComposition(bc: RenphoBodyComposition): string {
+export function formatBodyComposition(
+  bc: RenphoBodyComposition,
+  timeZone?: string,
+): string {
   let text = `**Body Composition Summary**\n`;
-  text += `Measured: ${formatDate(bc.measurement.time_stamp)}\n\n`;
+  text += `Measured: ${formatDate(bc.measurement.time_stamp, timeZone)}\n\n`;
 
   text += `| Metric | Value | Status |\n`;
   text += `|--------|-------|--------|\n`;
@@ -127,6 +151,7 @@ export function formatWeightTrend(trend: RenphoWeightTrend): string {
 
 export function formatMeasurementList(
   measurements: RenphoMeasurement[],
+  timeZone?: string,
 ): string {
   if (measurements.length === 0) {
     return "No measurements found.";
@@ -137,7 +162,7 @@ export function formatMeasurementList(
   text += `|------|--------|----------|--------|-----|------------|------------|\n`;
 
   for (const m of measurements) {
-    const date = formatDate(m.time_stamp).split(",")[0];
+    const date = formatDate(m.time_stamp, timeZone).split(",")[0];
     text += `| ${date} | ${m.weight?.toFixed(1) || "-"} kg | ${m.bodyfat?.toFixed(1) || "-"}% | ${m.muscle?.toFixed(1) || "-"}% | ${m.bmi?.toFixed(1) || "-"} | ${m.user_id || "-"} | ${m.scale_user_id || "-"} |\n`;
   }
 
@@ -162,6 +187,7 @@ export function formatScaleUsers(scaleUsers: RenphoScaleUser[]): string {
 
 export function formatSyncDiagnostics(
   diagnostics: RenphoSyncDiagnostics,
+  timeZone?: string,
 ): string {
   let text = `**Sync Diagnostics**\n\n`;
   text += `Current user: ${diagnostics.user.account_name || diagnostics.user.email} (${diagnostics.user.id})\n`;
@@ -206,7 +232,7 @@ export function formatSyncDiagnostics(
         [device.scale_name, device.internal_model, device.mac]
           .filter(Boolean)
           .join(" / ") || "unknown device";
-      text += `- ${label}: ${device.measurement_count} measurements, latest ${formatDate(device.latest_time_stamp)}\n`;
+      text += `- ${label}: ${device.measurement_count} measurements, latest ${formatDate(device.latest_time_stamp, timeZone)}\n`;
     }
   }
 
@@ -224,18 +250,18 @@ export function formatSyncDiagnostics(
 
   text += `\n**Visible Latest Measurement**\n`;
   text += diagnostics.visible_latest_measurement
-    ? `${formatMeasurement(diagnostics.visible_latest_measurement)}\n`
+    ? `${formatMeasurement(diagnostics.visible_latest_measurement, timeZone)}\n`
     : "No visible measurement found.\n";
 
   text += `\n**Latest Associated Measurement Across All Linked Scale Users**\n`;
   text += diagnostics.latest_associated_measurement
-    ? `${formatMeasurement(diagnostics.latest_associated_measurement)}\n`
+    ? `${formatMeasurement(diagnostics.latest_associated_measurement, timeZone)}\n`
     : "No associated measurements found.\n";
 
   if (diagnostics.hidden_associated_measurements.length > 0) {
     text += `\n**Associated Measurements Not Currently Selected For Current User**\n`;
     for (const measurement of diagnostics.hidden_associated_measurements) {
-      text += `- ${formatDate(measurement.time_stamp)} | ${measurement.weight?.toFixed(1) || "N/A"} kg | bound=${measurement.user_id || "-"} | scale=${measurement.scale_user_id || "-"}\n`;
+      text += `- ${formatDate(measurement.time_stamp, timeZone)} |${measurement.weight?.toFixed(1) || "N/A"} kg | bound=${measurement.user_id || "-"} | scale=${measurement.scale_user_id || "-"}\n`;
     }
   }
 

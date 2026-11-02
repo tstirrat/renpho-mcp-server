@@ -1,8 +1,11 @@
+import { resolveTimeZone } from './utils/formatting.js';
+
 export interface RenphoConfig {
   email: string;
   password: string;
   logLevel: string;
   logDir?: string;
+  timeZone?: string;
 }
 
 export function loadConfig(): RenphoConfig {
@@ -17,6 +20,7 @@ export function loadConfig(): RenphoConfig {
     email,
     password,
     logLevel: process.env.LOG_LEVEL || 'info',
-    logDir: process.env.LOG_DIR || undefined
+    logDir: process.env.LOG_DIR || undefined,
+    timeZone: resolveTimeZone(process.env.RENPHO_TIMEZONE)
   };
 }

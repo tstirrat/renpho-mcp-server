@@ -70,3 +70,38 @@ test("tool input validation still rejects out-of-range arguments", async () => {
   assert.match(text, /365/);
   await client.close();
 });
+
+test("createServer prints measurement times in the requested time zone", async () => {
+  const api = {
+    getLatestMeasurement: async () => ({
+      id: "m1",
+      // 2026-11-01 20:31 UTC
+      time_stamp: Date.UTC(2026, 10, 1, 20, 31) / 1000,
+      weight: 70,
+    }),
+  } as unknown as RenphoApiService;
+
+  const results: string[] = [];
+  for (const timeZone of ["UTC", "Australia/Brisbane"]) {
+    const client = await connect(createServer(api, logger, { timeZone }));
+    const result = await client.callTool({
+      name: "get_latest_measurement",
+      arguments: {},
+    });
+    const [content] = result.content as Array<{ text: string }>;
+    results.push(content.text.split("\n")[0].replace(/\s/g, " "));
+    await client.close();
+  }
+
+  assert.deepEqual(results, [
+    "Date: Nov 1, 2026, 08:31 PM UTC",
+    "Date: Nov 2, 2026, 06:31 AM GMT+10",
+  ]);
+});
+
+test("createServer rejects an invalid time zone up front", () => {
+  assert.throws(
+    () => createServer(fakeApi().api, logger, { timeZone: "Mars/Olympus" }),
+    /Invalid time zone/,
+  );
+});

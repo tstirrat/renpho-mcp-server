@@ -1,7 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatDate, formatMeasurementList } from "../src/utils/formatting.js";
-import type { RenphoMeasurement } from "../src/types/renpho.js";
+import {
+  formatBodyComposition,
+  formatDate,
+  formatMeasurement,
+  formatMeasurementList,
+  resolveTimeZone,
+} from "../src/utils/formatting.js";
+import type {
+  RenphoBodyComposition,
+  RenphoMeasurement,
+} from "../src/types/renpho.js";
 
 for (const count of [0, 1, 20, 21, 100, 500]) {
   test(`formatMeasurementList renders all ${count} selected measurements`, () => {
@@ -56,3 +65,66 @@ for (const count of [0, 1, 20, 21, 100, 500]) {
     assert.doesNotMatch(text, /more measurements/);
   });
 }
+
+// 2026-11-01 20:31 UTC is 06:31 the next morning in Brisbane (UTC+10, no DST).
+const READING = Date.UTC(2026, 10, 1, 20, 31) / 1000;
+
+function normalise(text: string): string {
+  return text.replace(/\s/g, " ");
+}
+
+test("formatDate prints the zone name and honours an explicit zone", () => {
+  assert.equal(
+    normalise(formatDate(READING, "UTC")),
+    "Nov 1, 2026, 08:31 PM UTC",
+  );
+  assert.equal(
+    normalise(formatDate(READING, "Australia/Brisbane")),
+    "Nov 2, 2026, 06:31 AM GMT+10",
+  );
+});
+
+test("formatMeasurementList buckets rows by day in the requested zone", () => {
+  const measurement: RenphoMeasurement = {
+    id: "m1",
+    time_stamp: READING,
+    weight: 70,
+  };
+  assert.match(formatMeasurementList([measurement], "UTC"), /\| Nov 1 \|/);
+  assert.match(
+    formatMeasurementList([measurement], "Australia/Brisbane"),
+    /\| Nov 2 \|/,
+  );
+});
+
+test("formatMeasurement and body composition use the requested zone", () => {
+  const measurement: RenphoMeasurement = {
+    id: "m1",
+    time_stamp: READING,
+    weight: 70,
+  };
+  assert.match(
+    normalise(formatMeasurement(measurement, "Australia/Brisbane")),
+    /^Date: Nov 2, 2026, 06:31 AM GMT\+10/,
+  );
+  assert.match(
+    normalise(
+      formatBodyComposition(
+        {
+          measurement,
+          formatted: {},
+          classifications: {},
+        } as unknown as RenphoBodyComposition,
+        "UTC",
+      ),
+    ),
+    /Measured: Nov 1, 2026, 08:31 PM UTC/,
+  );
+});
+
+test("resolveTimeZone accepts IANA names, ignores blanks and rejects typos", () => {
+  assert.equal(resolveTimeZone(" Australia/Brisbane "), "Australia/Brisbane");
+  assert.equal(resolveTimeZone(undefined), undefined);
+  assert.equal(resolveTimeZone("  "), undefined);
+  assert.throws(() => resolveTimeZone("Mars/Olympus"), /Invalid time zone/);
+});

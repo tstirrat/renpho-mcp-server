@@ -10,6 +10,7 @@ import {
   formatMeasurementList,
   formatScaleUsers,
   formatSyncDiagnostics,
+  resolveTimeZone,
 } from "./utils/formatting.js";
 
 export const SERVER_NAME = "renpho-mcp-server";
@@ -18,10 +19,18 @@ export const SERVER_VERSION = "1.2.1";
 // Builds a fully registered MCP server. It owns no transport and no global
 // state, so a caller may create one per request (stateless HTTP) or one for
 // the process lifetime (stdio) while sharing a single RenphoApiService.
+// `timeZone` (IANA name, e.g. "Australia/Brisbane") controls how measurement
+// times are printed; it defaults to the host's zone.
+export interface ServerOptions {
+  timeZone?: string;
+}
+
 export function createServer(
   renphoApi: RenphoApiService,
   logger: Pick<Logger, "error">,
+  options: ServerOptions = {},
 ): McpServer {
+  const timeZone = resolveTimeZone(options.timeZone);
   const server = new McpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
@@ -93,7 +102,7 @@ export function createServer(
           content: [
             {
               type: "text" as const,
-              text: formatMeasurement(measurement),
+              text: formatMeasurement(measurement, timeZone),
             },
           ],
         };
@@ -126,7 +135,7 @@ export function createServer(
           content: [
             {
               type: "text" as const,
-              text: formatBodyComposition(composition),
+              text: formatBodyComposition(composition, timeZone),
             },
           ],
         };
@@ -210,7 +219,7 @@ export function createServer(
           content: [
             {
               type: "text" as const,
-              text: formatMeasurementList(measurements),
+              text: formatMeasurementList(measurements, timeZone),
             },
           ],
         };
@@ -244,7 +253,7 @@ export function createServer(
           content: [
             {
               type: "text" as const,
-              text: formatSyncDiagnostics(diagnostics),
+              text: formatSyncDiagnostics(diagnostics, timeZone),
             },
           ],
         };

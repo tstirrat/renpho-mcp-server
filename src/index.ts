@@ -16,7 +16,7 @@ const logger = createAppLogger({
 
 const renphoApi = new RenphoApiService(config.email, config.password);
 
-const server = createServer(renphoApi, logger);
+const server = createServer(renphoApi, logger, { timeZone: config.timeZone });
 
 async function main() {
   try {

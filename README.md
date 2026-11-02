@@ -43,6 +43,7 @@ Optional settings:
 
 - `LOG_LEVEL` — `debug`, `info` (default), `warn` or `error`.
 - `LOG_DIR` — also write size-capped log files (5 MB x 3) to this directory. Logs always go to stderr; stdout is reserved for the MCP protocol. Unset means no log files are written.
+- `RENPHO_TIMEZONE` — IANA time zone (for example `Australia/Brisbane`) used to print measurement times. Defaults to the host's zone, which is UTC on most servers, so set it when running remotely. Times always include the zone name, such as `Nov 2, 2026, 06:31 AM GMT+10`. An invalid name stops the server at startup.
 
 ### Claude Code
 
