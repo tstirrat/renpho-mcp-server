@@ -35,6 +35,104 @@ export function formatDate(timestamp: number, timeZone?: string): string {
   });
 }
 
+function localParts(timestamp: number, timeZone?: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+    timeZoneName: "longOffset",
+  }).formatToParts(new Date(timestamp * 1000));
+  const get = (type: string) =>
+    parts.find((p) => p.type === type)?.value ?? "00";
+  // longOffset yields "GMT", "GMT+10", or "GMT+05:30".
+  const raw = get("timeZoneName").replace("GMT", "");
+  let offset = "+00:00";
+  if (raw) {
+    const [h, m = "00"] = raw.slice(1).split(":");
+    offset = `${raw[0]}${h.padStart(2, "0")}:${m}`;
+  }
+  return {
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
+    time: `${get("hour")}:${get("minute")}:${get("second")}`,
+    offset,
+  };
+}
+
+// Unambiguous ISO 8601 timestamp with the UTC offset, e.g.
+// 2026-11-13T06:06:00+10:00, rendered in the configured zone.
+export function formatTimestamp(timestamp: number, timeZone?: string): string {
+  const p = localParts(timestamp, timeZone);
+  return `${p.date}T${p.time}${p.offset}`;
+}
+
+// Name of the zone times are rendered in (configured, else the host's).
+export function zoneLabel(timeZone?: string): string {
+  return timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+export function parseTimeOfDay(value: string): number {
+  const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
+  if (!match) throw new Error(`Invalid time of day "${value}"; use HH:MM`);
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+export interface TimeFilter {
+  before?: string; // local HH:MM, exclusive
+  after?: string; // local HH:MM, inclusive
+  firstPerDay?: boolean; // keep only the earliest reading of each local day
+}
+
+export function hasTimeFilter(f?: TimeFilter): boolean {
+  return Boolean(f && (f.before || f.after || f.firstPerDay));
+}
+
+// Filters by local time of day. `before` is exclusive and `after` inclusive;
+// when after > before the window wraps midnight.
+export function filterByTimeOfDay<T extends { time_stamp: number }>(
+  items: T[],
+  filter: TimeFilter | undefined,
+  timeZone?: string,
+): T[] {
+  if (!hasTimeFilter(filter)) return items;
+  const before = filter!.before ? parseTimeOfDay(filter!.before) : undefined;
+  const after = filter!.after ? parseTimeOfDay(filter!.after) : undefined;
+  let out = items.filter((m) => {
+    const p = localParts(m.time_stamp, timeZone);
+    const t = p.hour * 60 + p.minute;
+    if (before !== undefined && after !== undefined && after > before) {
+      return t >= after || t < before;
+    }
+    if (before !== undefined && t >= before) return false;
+    if (after !== undefined && t < after) return false;
+    return true;
+  });
+  if (filter!.firstPerDay) {
+    const earliest = new Map<string, T>();
+    for (const m of out) {
+      const day = localParts(m.time_stamp, timeZone).date;
+      const cur = earliest.get(day);
+      if (!cur || m.time_stamp < cur.time_stamp) earliest.set(day, m);
+    }
+    out = out.filter((m) => [...earliest.values()].includes(m));
+  }
+  return out;
+}
+
+export function describeTimeFilter(f?: TimeFilter): string {
+  const parts: string[] = [];
+  if (f?.after) parts.push(`at or after ${f.after}`);
+  if (f?.before) parts.push(`before ${f.before}`);
+  if (f?.firstPerDay) parts.push("first reading of each day only");
+  return parts.join(", ");
+}
+
 export function formatUser(user: RenphoUser): string {
   let text = `User: ${user.account_name || [user.first_name, user.last_name].filter(Boolean).join(" ") || user.email}\n`;
   text += `Email: ${user.email}\n`;
@@ -130,21 +228,30 @@ export function formatBodyComposition(
   return text;
 }
 
-export function formatWeightTrend(trend: RenphoWeightTrend): string {
+export function formatWeightTrend(
+  trend: RenphoWeightTrend,
+  timeZone?: string,
+  filter?: TimeFilter,
+): string {
+  const at = (ts: number) => formatTimestamp(ts, timeZone);
   const changeIcon = trend.change > 0 ? "+" : "";
   const direction =
     trend.change > 0 ? "gained" : trend.change < 0 ? "lost" : "maintained";
 
-  let text = `**Weight Trend (${trend.period})**\n\n`;
+  let text = `**Weight Trend (${trend.period})**\n`;
+  text += `Times shown in ${zoneLabel(timeZone)}.\n`;
+  if (hasTimeFilter(filter))
+    text += `Filter: ${describeTimeFilter(filter)} (local time).\n`;
+  text += `\n`;
   text += `You ${direction} ${Math.abs(trend.change).toFixed(1)} kg (${changeIcon}${trend.change_percent.toFixed(1)}%)\n\n`;
-  text += `| Metric | Value |\n`;
-  text += `|--------|-------|\n`;
-  text += `| Start Weight | ${trend.start_weight.toFixed(1)} kg |\n`;
-  text += `| Current Weight | ${trend.end_weight.toFixed(1)} kg |\n`;
-  text += `| Min Weight | ${trend.min_weight.toFixed(1)} kg |\n`;
-  text += `| Max Weight | ${trend.max_weight.toFixed(1)} kg |\n`;
-  text += `| Avg Weight | ${trend.avg_weight.toFixed(1)} kg |\n`;
-  text += `| Measurements | ${trend.measurement_count} |\n`;
+  text += `| Metric | Value | When |\n`;
+  text += `|--------|-------|------|\n`;
+  text += `| Start Weight | ${trend.start_weight.toFixed(1)} kg | ${at(trend.start_time)} |\n`;
+  text += `| Current Weight | ${trend.end_weight.toFixed(1)} kg | ${at(trend.end_time)} |\n`;
+  text += `| Min Weight | ${trend.min_weight.toFixed(1)} kg | ${at(trend.min_time)} |\n`;
+  text += `| Max Weight | ${trend.max_weight.toFixed(1)} kg | ${at(trend.max_time)} |\n`;
+  text += `| Avg Weight | ${trend.avg_weight.toFixed(1)} kg | - |\n`;
+  text += `| Measurements | ${trend.measurement_count} | - |\n`;
 
   return text;
 }
@@ -152,18 +259,22 @@ export function formatWeightTrend(trend: RenphoWeightTrend): string {
 export function formatMeasurementList(
   measurements: RenphoMeasurement[],
   timeZone?: string,
+  filter?: TimeFilter,
 ): string {
   if (measurements.length === 0) {
     return "No measurements found.";
   }
 
-  let text = `**Recent Measurements (${measurements.length})**\n\n`;
-  text += `| Date | Weight | Body Fat | Muscle | BMI | Bound User | Scale User |\n`;
+  let text = `**Recent Measurements (${measurements.length})**\n`;
+  text += `Times are local time in ${zoneLabel(timeZone)} (ISO 8601 with UTC offset).\n`;
+  if (hasTimeFilter(filter))
+    text += `Filter: ${describeTimeFilter(filter)} (local time).\n`;
+  text += `\n`;
+  text += `| Time | Weight | Body Fat | Muscle | BMI | Bound User | Scale User |\n`;
   text += `|------|--------|----------|--------|-----|------------|------------|\n`;
 
   for (const m of measurements) {
-    const date = formatDate(m.time_stamp, timeZone).split(",")[0];
-    text += `| ${date} | ${m.weight?.toFixed(1) || "-"} kg | ${m.bodyfat?.toFixed(1) || "-"}% | ${m.muscle?.toFixed(1) || "-"}% | ${m.bmi?.toFixed(1) || "-"} | ${m.user_id || "-"} | ${m.scale_user_id || "-"} |\n`;
+    text += `| ${formatTimestamp(m.time_stamp, timeZone)} | ${m.weight?.toFixed(1) || "-"} kg | ${m.bodyfat?.toFixed(1) || "-"}% | ${m.muscle?.toFixed(1) || "-"}% | ${m.bmi?.toFixed(1) || "-"} | ${m.user_id || "-"} | ${m.scale_user_id || "-"} |\n`;
   }
 
   return text;

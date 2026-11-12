@@ -87,6 +87,10 @@ export interface RenphoWeightTrend {
   min_weight: number;
   max_weight: number;
   avg_weight: number;
+  start_time: number;
+  end_time: number;
+  min_time: number;
+  max_time: number;
   measurement_count: number;
 }
 

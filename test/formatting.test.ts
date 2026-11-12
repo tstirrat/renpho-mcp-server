@@ -5,6 +5,9 @@ import {
   formatDate,
   formatMeasurement,
   formatMeasurementList,
+  formatWeightTrend,
+  formatTimestamp,
+  filterByTimeOfDay,
   resolveTimeZone,
 } from "../src/utils/formatting.js";
 import type {
@@ -42,13 +45,13 @@ for (const count of [0, 1, 20, 21, 100, 500]) {
       return;
     }
 
-    assert.ok(text.startsWith(`**Recent Measurements (${count})**\n\n`));
+    assert.ok(text.startsWith(`**Recent Measurements (${count})**\n`));
     const rows = text
       .split("\n")
       .filter((line) => line.startsWith("| "))
       .slice(1);
     const expectedRows = measurements.map((measurement) => {
-      const date = formatDate(measurement.time_stamp).split(",")[0];
+      const date = formatTimestamp(measurement.time_stamp);
       return `| ${date} | ${measurement.weight.toFixed(1)} kg | 20.0% | 40.0% | 22.0 | ${measurement.user_id} | ${measurement.scale_user_id} |`;
     });
 
@@ -84,17 +87,56 @@ test("formatDate prints the zone name and honours an explicit zone", () => {
   );
 });
 
-test("formatMeasurementList buckets rows by day in the requested zone", () => {
+test("formatMeasurementList prints ISO timestamps with offset in the requested zone", () => {
   const measurement: RenphoMeasurement = {
     id: "m1",
     time_stamp: READING,
     weight: 70,
   };
-  assert.match(formatMeasurementList([measurement], "UTC"), /\| Nov 1 \|/);
   assert.match(
-    formatMeasurementList([measurement], "Australia/Brisbane"),
-    /\| Nov 2 \|/,
+    formatMeasurementList([measurement], "UTC"),
+    /\| 2026-11-01T20:31:\d\d\+00:00 \|/,
   );
+  const brisbane = formatMeasurementList([measurement], "Australia/Brisbane");
+  assert.match(brisbane, /\| 2026-11-02T06:31:\d\d\+10:00 \|/);
+  assert.match(brisbane, /Australia\/Brisbane/);
+});
+
+test("filterByTimeOfDay keeps morning readings and first-per-day", () => {
+  const tz = "Australia/Brisbane";
+  // 06:06 and 19:30 Brisbane on 2026-11-13, plus 06:31 on 2026-11-14.
+  const at = (iso: string) => ({ time_stamp: Date.parse(iso) / 1000 });
+  const a = at("2026-11-13T06:06:00+10:00");
+  const b = at("2026-11-13T19:30:00+10:00");
+  const c = at("2026-11-14T06:31:00+10:00");
+  assert.deepEqual(filterByTimeOfDay([a, b, c], { before: "10:00" }, tz), [a, c]);
+  assert.deepEqual(filterByTimeOfDay([a, b, c], { after: "10:00" }, tz), [b]);
+  assert.deepEqual(filterByTimeOfDay([b, a, c], { firstPerDay: true }, tz), [a, c]);
+  assert.deepEqual(filterByTimeOfDay([a, b, c], { after: "19:00", before: "07:00" }, tz), [a, b, c]);
+  assert.throws(() => filterByTimeOfDay([a], { before: "25:00" }, tz), /HH:MM/);
+});
+
+test("formatWeightTrend labels start, end, min and max with timestamps", () => {
+  const text = formatWeightTrend(
+    {
+      period: "7 days",
+      start_weight: 78,
+      end_weight: 77,
+      change: -1,
+      change_percent: -1.3,
+      min_weight: 77,
+      max_weight: 78.4,
+      avg_weight: 77.8,
+      start_time: Date.parse("2026-11-06T06:00:00+10:00") / 1000,
+      end_time: Date.parse("2026-11-13T06:06:00+10:00") / 1000,
+      min_time: Date.parse("2026-11-13T06:06:00+10:00") / 1000,
+      max_time: Date.parse("2026-11-08T19:00:00+10:00") / 1000,
+      measurement_count: 8,
+    },
+    "Australia/Brisbane",
+  );
+  assert.match(text, /Max Weight \| 78\.4 kg \| 2026-11-08T19:00:00\+10:00/);
+  assert.match(text, /Start Weight \| 78\.0 kg \| 2026-11-06T06:00:00\+10:00/);
 });
 
 test("formatMeasurement and body composition use the requested zone", () => {

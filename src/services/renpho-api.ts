@@ -214,6 +214,9 @@ interface FamilyMemberResponse {
   lastName?: string;
 }
 
+// eslint-disable-next-line no-unused-vars
+export type MeasurementFilter = (rows: RenphoMeasurement[]) => RenphoMeasurement[];
+
 export class RenphoApiService {
   private email: string;
   private password: string;
@@ -1117,24 +1120,22 @@ export class RenphoApiService {
     };
   }
 
-  async getWeightTrend(days: number = 30): Promise<RenphoWeightTrend | null> {
+  async getWeightTrend(
+    days: number = 30,
+    filter?: MeasurementFilter,
+  ): Promise<RenphoWeightTrend | null> {
     const startTimestamp = Math.floor(
       (Date.now() - days * 24 * 60 * 60 * 1000) / 1000,
     );
-    const measurements = await this.getMeasurements(
-      undefined,
-      startTimestamp,
-      500,
-    );
+    const fetched = await this.getMeasurements(undefined, startTimestamp, 500);
+    const measurements = filter ? filter(fetched) : fetched;
 
     if (measurements.length === 0) return null;
 
-    const sorted = [...measurements].sort(
-      (a, b) => a.time_stamp - b.time_stamp,
-    );
-    const weights = sorted
-      .map((m) => m.weight)
-      .filter((w): w is number => w != null);
+    const sorted = [...measurements]
+      .filter((m) => m.weight != null)
+      .sort((a, b) => a.time_stamp - b.time_stamp);
+    const weights = sorted.map((m) => m.weight as number);
 
     if (weights.length === 0) return null;
 
@@ -1144,6 +1145,8 @@ export class RenphoApiService {
     const changePercent = (change / startWeight) * 100;
     const minWeight = Math.min(...weights);
     const maxWeight = Math.max(...weights);
+    const minAt = sorted[weights.indexOf(minWeight)].time_stamp;
+    const maxAt = sorted[weights.indexOf(maxWeight)].time_stamp;
     const avgWeight = weights.reduce((a, b) => a + b, 0) / weights.length;
 
     return {
@@ -1155,6 +1158,10 @@ export class RenphoApiService {
       min_weight: minWeight,
       max_weight: maxWeight,
       avg_weight: avgWeight,
+      start_time: sorted[0].time_stamp,
+      end_time: sorted[sorted.length - 1].time_stamp,
+      min_time: minAt,
+      max_time: maxAt,
       measurement_count: measurements.length,
     };
   }

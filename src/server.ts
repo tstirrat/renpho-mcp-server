@@ -11,6 +11,10 @@ import {
   formatScaleUsers,
   formatSyncDiagnostics,
   resolveTimeZone,
+  filterByTimeOfDay,
+  hasTimeFilter,
+  parseTimeOfDay,
+  type TimeFilter,
 } from "./utils/formatting.js";
 
 export const SERVER_NAME = "renpho-mcp-server";
@@ -21,6 +25,37 @@ export const SERVER_VERSION = "1.2.1";
 // the process lifetime (stdio) while sharing a single RenphoApiService.
 // `timeZone` (IANA name, e.g. "Australia/Brisbane") controls how measurement
 // times are printed; it defaults to the host's zone.
+const timeFilterShape = {
+  before: z
+    .string()
+    .optional()
+    .describe(
+      'Only readings taken before this local time of day, "HH:MM" 24h (e.g. "10:00" for fasted morning weigh-ins). Local = the server\'s configured time zone.',
+    ),
+  after: z
+    .string()
+    .optional()
+    .describe(
+      'Only readings taken at or after this local time of day, "HH:MM" 24h. If after is later than before, the window wraps midnight.',
+    ),
+  first_per_day: z
+    .boolean()
+    .optional()
+    .describe(
+      "Keep only the earliest reading of each local day (drops duplicate/evening weigh-ins).",
+    ),
+};
+
+function toTimeFilter(a: {
+  before?: string;
+  after?: string;
+  first_per_day?: boolean;
+}): TimeFilter {
+  if (a.before) parseTimeOfDay(a.before);
+  if (a.after) parseTimeOfDay(a.after);
+  return { before: a.before, after: a.after, firstPerDay: a.first_per_day };
+}
+
 export interface ServerOptions {
   timeZone?: string;
 }
@@ -157,10 +192,23 @@ export function createServer(
         .max(365)
         .default(30)
         .describe("Number of days to analyze (default: 30)"),
+      ...timeFilterShape,
     },
-    async ({ days }: { days: number }) => {
+    async (args: {
+      days: number;
+      before?: string;
+      after?: string;
+      first_per_day?: boolean;
+    }) => {
+      const { days } = args;
       try {
-        const trend = await renphoApi.getWeightTrend(days);
+        const filter = toTimeFilter(args);
+        const trend = await renphoApi.getWeightTrend(
+          days,
+          hasTimeFilter(filter)
+            ? (ms) => filterByTimeOfDay(ms, filter, timeZone)
+            : undefined,
+        );
         if (!trend) {
           return {
             content: [
@@ -175,7 +223,7 @@ export function createServer(
           content: [
             {
               type: "text" as const,
-              text: formatWeightTrend(trend),
+              text: formatWeightTrend(trend, timeZone, filter),
             },
           ],
         };
@@ -204,22 +252,37 @@ export function createServer(
         .max(500)
         .default(100)
         .describe("Maximum number of measurements (default: 100)"),
+      ...timeFilterShape,
     },
-    async ({ days, limit }: { days: number; limit: number }) => {
+    async (args: {
+      days: number;
+      limit: number;
+      before?: string;
+      after?: string;
+      first_per_day?: boolean;
+    }) => {
+      const { days, limit } = args;
       try {
+        const filter = toTimeFilter(args);
         const startTimestamp = Math.floor(
           (Date.now() - days * 24 * 60 * 60 * 1000) / 1000,
         );
-        const measurements = await renphoApi.getMeasurements(
+        // With a time filter, fetch the widest window first so the limit
+        // applies to matching readings rather than to the unfiltered list.
+        const filtering = hasTimeFilter(filter);
+        const fetched = await renphoApi.getMeasurements(
           undefined,
           startTimestamp,
-          limit,
+          filtering ? 500 : limit,
         );
+        const measurements = filtering
+          ? filterByTimeOfDay(fetched, filter, timeZone).slice(0, limit)
+          : fetched;
         return {
           content: [
             {
               type: "text" as const,
-              text: formatMeasurementList(measurements, timeZone),
+              text: formatMeasurementList(measurements, timeZone, filter),
             },
           ],
         };
